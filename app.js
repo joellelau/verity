@@ -105,6 +105,7 @@ const icon = {
   pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/>',
   reply: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 016 6v5"/>',
   check: '<path d="M5 12l5 5 9-10"/>',
+  trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12"/><path d="M9 7V4h6v3"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   back: '<path d="M15 18l-6-6 6-6"/>',
@@ -459,7 +460,10 @@ function renderChat() {
     else if (m.type === 'reply') body = replyBubble(m);
     else if (m.type === 'reflection') body = reflectionCard(m);
     if (!body) return '';
-    return `<div class="msg">${body}<div class="time">${fmtTime(m.createdAt)}</div></div>`;
+    const del = m.type === 'article'
+      ? `<button type="button" class="msg-del" data-action="delete-article" data-id="${m.aid}" aria-label="Delete this link" title="Delete">${svg('trash', 14)}</button>`
+      : `<button type="button" class="msg-del" data-action="delete-entry" data-id="${m.id}" aria-label="Delete this ${m.type === 'reply' ? 'reply' : 'reflection'}" title="Delete">${svg('trash', 14)}</button>`;
+    return `<div class="msg">${body}<div class="msg-meta">${del}<span class="time">${fmtTime(m.createdAt)}</span></div></div>`;
   }).join('');
   const empty = `<div class="empty-chat"><b class="serif">Nothing Saved Yet</b>Paste a link below to save your first article, or write a thought to save it as a reflection.</div>`;
   return `<div class="chat-scroll"><div class="feed">${items || empty}</div></div>`;
@@ -782,7 +786,7 @@ function renderArticle(r) {
     <div class="subtle-actions">
       <button type="button" class="text-btn" data-action="reflect" data-id="${a.id}">Write a reflection</button>
       <button type="button" class="text-btn" data-action="edit-title" data-id="${a.id}">Edit title</button>
-      <button type="button" class="text-btn" data-action="delete-article" data-id="${a.id}">Remove from log</button>
+      <button type="button" class="text-btn" data-action="delete-article" data-id="${a.id}">Delete this link</button>
     </div>
   </div></div>`;
 }
@@ -997,7 +1001,7 @@ const actions = {
   'delete-article': async (id) => {
     const a = byId(id);
     if (!a) return;
-    if (!(await ask({ title: 'Remove This Article?', message: `“${titleCase(a.title)}” and its quotes and notes will be deleted.`, confirmLabel: 'Remove', danger: true }))) return;
+    if (!(await ask({ title: 'Delete This Link?', message: `“${titleCase(a.title)}” and its quotes and notes will be deleted. Reflections that mention it are kept.`, confirmLabel: 'Delete', danger: true }))) return;
     const touched = data.feed.filter((m) => m.type === 'reflection' && (m.links || []).includes(id));
     data.articles = data.articles.filter((x) => x.id !== id);
     data.feed = data.feed
@@ -1005,11 +1009,14 @@ const actions = {
       .map((m) => (m.type === 'reflection' ? Object.assign({}, m, { links: (m.links || []).filter((x) => x !== id) }) : m));
     if (ui.replyTo === id) ui.replyTo = null;
     persist(Promise.all(touched.map((m) => db.updateItemLinks(m.id, m.links.filter((x) => x !== id)))).then(() => db.deleteArticle(id)));
-    toast('Removed.');
-    go('#/articles');
+    toast('Deleted.');
+    if (route().name === 'article') go('#/articles');
+    else preserveScroll(render);
   },
   'delete-entry': async (id) => {
-    if (!(await ask({ title: 'Delete This?', message: 'This can’t be undone.', confirmLabel: 'Delete', danger: true }))) return;
+    const m = data.feed.find((x) => x.id === id);
+    const what = m && m.type === 'reflection' ? 'Reflection' : m && m.type === 'reply' ? 'Reply' : 'This';
+    if (!(await ask({ title: `Delete ${what}?`, message: 'This can’t be undone.', confirmLabel: 'Delete', danger: true }))) return;
     data.feed = data.feed.filter((m) => m.id !== id);
     persist(db.deleteItem(id));
     preserveScroll(commit);
@@ -1030,7 +1037,7 @@ const actions = {
   },
   'sign-out': async () => {
     closeDrawer(false);
-    if (!(await ask({ title: 'Sign Out?', message: 'You can sign back in any time with an email link.', confirmLabel: 'Sign out' }))) return;
+    if (!(await ask({ title: 'Sign Out?', message: 'You can sign back in any time with your email and password.', confirmLabel: 'Sign out' }))) return;
     await store.signOut();
   }
 };
@@ -1082,50 +1089,144 @@ function hideGate() {
 
 const brandBlock = `<div class="gate-brand"><div class="logo">${svg('book', 18)}</div><div class="brand-name serif">Verity</div></div>`;
 
-function showSignIn(message) {
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function friendlyAuthError(err) {
+  const m = (err && err.message) || '';
+  if (/invalid login credentials/i.test(m)) return 'That email and password don’t match. Check them, or reset your password.';
+  if (/email not confirmed/i.test(m)) return 'Confirm your email first: open the link we sent you, then sign in.';
+  if (/already registered|already exists/i.test(m)) return 'There’s already an account with that email. Sign in instead.';
+  if (/password/i.test(m) && /(short|least|characters|weak)/i.test(m)) return 'Choose a longer password: at least 8 characters.';
+  if (/rate|seconds|too many/i.test(m)) return 'Too many tries. Wait a minute, then try again.';
+  if (/fetch|network/i.test(m)) return 'Couldn’t reach the server. Check your connection and try again.';
+  return 'Something went wrong: ' + (m || 'unknown error') + '.';
+}
+
+// mode: 'signin' | 'signup' | 'forgot'
+function showSignIn(message, mode = 'signin', presetEmail = '') {
+  const isUp = mode === 'signup';
+  const isForgot = mode === 'forgot';
+  const title = isForgot ? 'Reset Your Password' : isUp ? 'Create Your Account' : 'Your Reading, in One Place';
+  const intro = isForgot
+    ? 'Enter the email you signed up with and we’ll send you a link to choose a new password.'
+    : isUp ? 'Save links, reply with quotes and notes, and reflect on what you read. Your log syncs across your devices.'
+    : 'Save links, reply with quotes and notes, and reflect on what you read. Sign in to pick up where you left off.';
   showGate(`<div class="gate-card card">
     ${brandBlock}
-    <h1 class="gate-title serif">Your Reading, in One Place</h1>
-    <p class="gate-text">Save links, reply with quotes and notes, and reflect on what you read. Enter your email and we’ll send you a link to sign in. No password needed.</p>
-    <form id="signInForm" class="gate-form" novalidate>
+    <h1 class="gate-title serif">${title}</h1>
+    <p class="gate-text">${intro}</p>
+    ${isForgot ? '' : `<div class="tabs auth-tabs" role="tablist" aria-label="Account">
+      <a role="tab" href="#" data-auth="signin" aria-selected="${!isUp}">Sign in</a>
+      <a role="tab" href="#" data-auth="signup" aria-selected="${isUp}">Create account</a>
+    </div>`}
+    <form id="authForm" class="gate-form" novalidate>
       <label for="email" class="gate-label">Email</label>
-      <input id="email" class="dialog-input" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required>
-      <button type="submit" class="btn btn-dark btn-block" id="signInBtn">Email me a sign-in link</button>
-      <p class="gate-note" id="signInNote" role="status">${message ? esc(message) : ''}</p>
+      <input id="email" class="dialog-input" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" value="${esc(presetEmail)}" required>
+      ${isForgot ? '' : `<div class="label-row"><label for="password" class="gate-label">Password</label>${isUp ? '<span class="gate-hint">At least 8 characters</span>' : '<a href="#" class="gate-link" data-auth="forgot">Forgot password?</a>'}</div>
+      <div class="pw-wrap">
+        <input id="password" class="dialog-input" type="password" autocomplete="${isUp ? 'new-password' : 'current-password'}" minlength="8" required>
+        <button type="button" class="pw-toggle" id="pwToggle" aria-label="Show password" aria-pressed="false">Show</button>
+      </div>`}
+      <button type="submit" class="btn btn-dark btn-block" id="authBtn">${isForgot ? 'Email me a reset link' : isUp ? 'Create account' : 'Sign in'}</button>
+      <p class="gate-note" id="authNote" role="status">${message ? esc(message) : ''}</p>
+      ${isForgot ? '<button type="button" class="btn btn-outline btn-block" data-auth="signin">Back to sign in</button>' : ''}
     </form>
-    ${guestOffer()}
+    ${isForgot ? '' : guestOffer()}
   </div>`);
   bindGuestButton();
-  const form = $('signInForm');
   const email = $('email');
-  email.focus();
-  form.addEventListener('submit', async (e) => {
+  const password = $('password');
+  const note = $('authNote');
+  const btn = $('authBtn');
+  (presetEmail && password ? password : email).focus();
+
+  $('gate').querySelectorAll('[data-auth]').forEach((el) => el.addEventListener('click', (e) => {
+    e.preventDefault();
+    showSignIn('', el.dataset.auth, email.value.trim());
+  }));
+  if ($('pwToggle')) $('pwToggle').addEventListener('click', () => {
+    const show = password.type === 'password';
+    password.type = show ? 'text' : 'password';
+    $('pwToggle').textContent = show ? 'Hide' : 'Show';
+    $('pwToggle').setAttribute('aria-pressed', String(show));
+    $('pwToggle').setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  });
+
+  $('authForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const value = email.value.trim();
-    const note = $('signInNote');
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) { note.textContent = 'Enter a valid email address, like you@example.com.'; email.focus(); return; }
-    const btn = $('signInBtn');
+    if (!EMAIL_RE.test(value)) { note.textContent = 'Enter a valid email address, like you@example.com.'; email.focus(); return; }
+    if (!isForgot && password.value.length < 8) {
+      note.textContent = isUp ? 'Choose a password with at least 8 characters.' : 'Enter your password (at least 8 characters).';
+      password.focus();
+      return;
+    }
+    const label = btn.textContent;
     btn.disabled = true;
-    btn.textContent = 'Sending…';
+    btn.textContent = isForgot ? 'Sending…' : isUp ? 'Creating account…' : 'Signing in…';
+    note.textContent = '';
     try {
-      await store.sendSignInLink(value);
-      showCheckEmail(value);
+      if (isForgot) {
+        await store.sendPasswordReset(value);
+        showCheckEmail(value, 'reset');
+      } else if (isUp) {
+        const r = await store.signUp(value, password.value);
+        if (r.alreadyRegistered) { btn.disabled = false; btn.textContent = label; note.textContent = 'There’s already an account with that email. Sign in instead.'; return; }
+        if (r.needsConfirmation) showCheckEmail(value, 'confirm');
+        // otherwise the sign-in event opens the app
+      } else {
+        await store.signIn(value, password.value);
+        // the sign-in event opens the app
+      }
     } catch (err) {
       btn.disabled = false;
-      btn.textContent = 'Email me a sign-in link';
-      note.textContent = /rate|seconds/i.test(err.message || '') ? 'Too many tries. Wait a minute, then try again.' : 'Couldn’t send the link: ' + (err.message || 'unknown error') + '.';
+      btn.textContent = label;
+      note.textContent = friendlyAuthError(err);
     }
   });
 }
 
-function showCheckEmail(email) {
+function showCheckEmail(email, kind) {
+  const text = kind === 'reset'
+    ? `If there’s an account for <b>${esc(email)}</b>, we’ve sent a link to choose a new password. Open it in this same browser.`
+    : `We sent a confirmation link to <b>${esc(email)}</b>. Open it in this same browser to finish creating your account.`;
   showGate(`<div class="gate-card card">
     ${brandBlock}
     <h1 class="gate-title serif">Check Your Email</h1>
-    <p class="gate-text">We sent a sign-in link to <b>${esc(email)}</b>. Open it in this same browser to continue. It can take a minute to arrive, so check your spam folder too.</p>
-    <button type="button" class="btn btn-outline btn-block" id="useOther">Use a different email</button>
+    <p class="gate-text">${text} It can take a minute to arrive, so check your spam folder too.</p>
+    <button type="button" class="btn btn-outline btn-block" id="backToSignIn">Back to sign in</button>
   </div>`);
-  $('useOther').addEventListener('click', () => showSignIn());
+  $('backToSignIn').addEventListener('click', () => showSignIn('', 'signin', email));
+}
+
+function showSetPassword() {
+  showGate(`<div class="gate-card card">
+    ${brandBlock}
+    <h1 class="gate-title serif">Choose a New Password</h1>
+    <form id="pwForm" class="gate-form" novalidate>
+      <div class="label-row"><label for="newPassword" class="gate-label">New password</label><span class="gate-hint">At least 8 characters</span></div>
+      <input id="newPassword" class="dialog-input" type="password" autocomplete="new-password" minlength="8" required>
+      <button type="submit" class="btn btn-dark btn-block" id="pwBtn">Save password</button>
+      <p class="gate-note" id="pwNote" role="status"></p>
+    </form>
+  </div>`);
+  const input = $('newPassword');
+  input.focus();
+  $('pwForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (input.value.length < 8) { $('pwNote').textContent = 'Choose a password with at least 8 characters.'; input.focus(); return; }
+    $('pwBtn').disabled = true;
+    try {
+      await store.setNewPassword(input.value);
+      recovering = false;
+      const s = await store.getSession();
+      toast('Password saved.');
+      if (s) enterApp(s); else showSignIn('Password saved. Sign in with your new password.');
+    } catch (err) {
+      $('pwBtn').disabled = false;
+      $('pwNote').textContent = friendlyAuthError(err);
+    }
+  });
 }
 
 function showSetupNeeded() {
@@ -1162,6 +1263,7 @@ async function enterGuest() {
 }
 
 let connected = false;
+let recovering = false; // true while choosing a new password after a reset link
 function leaveGuest() {
   isGuest = false;
   db = store;
@@ -1192,10 +1294,15 @@ async function start() {
     if (pref('guest') === '1') enterGuest(); else showSetupNeeded();
     return;
   }
+  const url = new URL(location.href);
+  recovering = url.searchParams.get('reset') === '1';
+  if (recovering) { url.searchParams.delete('reset'); history.replaceState(null, '', url.pathname + url.search + url.hash); }
   let s = null;
   let problem = '';
-  try { s = await store.getSession(); } catch (e) { problem = 'That sign-in link didn’t work. It may have expired or already been used. Request a new one below.'; }
+  try { s = await store.getSession(); } catch (e) { problem = recovering ? 'That reset link didn’t work. It may have expired or already been used. Request a new one.' : 'That link didn’t work. It may have expired or already been used. Sign in below.'; recovering = false; }
   store.onAuthChange((event, next) => {
+    if (event === 'PASSWORD_RECOVERY') { recovering = true; showSetPassword(); return; }
+    if (recovering) return; // stay on the new-password screen until it's saved
     if (isGuest && !next) return; // guests aren't signed in; ignore
     if (event === 'SIGNED_OUT' || !next) {
       session = null;
@@ -1208,9 +1315,10 @@ async function start() {
       session = next;
     }
   });
-  if (s) enterApp(s);
+  if (recovering && s) showSetPassword();
+  else if (s) enterApp(s);
   else if (pref('guest') === '1' && !problem) enterGuest();
-  else showSignIn(problem);
+  else showSignIn(problem, problem && /reset/.test(problem) ? 'forgot' : 'signin');
 }
 
 start();

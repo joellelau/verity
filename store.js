@@ -1,4 +1,4 @@
-// Verity's connection to Supabase: sign-in and reading/writing your log.
+// Verity's connection to Supabase: sign-in (email and password) and reading/writing your log.
 // The rest of the app works with plain objects in this shape:
 //   article: { id, url, title, site, read, readAt, createdAt }
 //   item:    { id, type: 'article' | 'reply' | 'reflection', aid, quote, note, tags, text, links, createdAt }
@@ -56,11 +56,32 @@ export function onAuthChange(cb) {
   sb.auth.onAuthStateChange((event, session) => cb(event, session));
 }
 
-export async function sendSignInLink(email) {
-  const { error } = await sb.auth.signInWithOtp({
+export async function signUp(email, password) {
+  const { data, error } = await sb.auth.signUp({
     email,
+    password,
     options: { emailRedirectTo: location.origin + location.pathname }
   });
+  if (error) throw error;
+  // When email confirmation is on, there's no session until they click the link in their inbox.
+  // Supabase also returns no error for an email that's already registered, but with no identities.
+  return { needsConfirmation: !data.session, alreadyRegistered: !!(data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) };
+}
+
+export async function signIn(email, password) {
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+}
+
+export async function sendPasswordReset(email) {
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: location.origin + location.pathname + '?reset=1'
+  });
+  if (error) throw error;
+}
+
+export async function setNewPassword(password) {
+  const { error } = await sb.auth.updateUser({ password });
   if (error) throw error;
 }
 

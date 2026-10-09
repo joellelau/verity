@@ -176,6 +176,19 @@ a.article-title:hover { text-decoration: underline; text-underline-offset: 3px; 
 .day-pill { align-self: center; font-size: 12px; font-weight: 500; color: var(--icon); border: 1px solid var(--line); background: var(--surface); padding: 2px 10px; border-radius: 999px; }
 .msg { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .time { font-size: 11px; color: var(--muted); padding-right: 4px; }
+.msg-meta { display: flex; align-items: center; gap: 2px; }
+.msg-del { width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); display: flex; align-items: center; justify-content: center; opacity: 0.55; transition: opacity 120ms ease, background 120ms ease; }
+.msg-del:hover, .msg-del:focus-visible { opacity: 1; background: var(--soft); color: var(--danger); }
+@media (hover: hover) { .msg-del { opacity: 0; } .msg:hover .msg-del, .msg-del:focus-visible { opacity: 1; } }
+.auth-tabs { margin-top: 2px; }
+.label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.gate-hint { font-size: 12px; color: var(--muted); }
+.gate-link { font-size: 13px; color: var(--text-2); }
+.gate-link:hover { color: var(--text); }
+.pw-wrap { position: relative; }
+.pw-wrap .dialog-input { width: 100%; padding-right: 64px; }
+.pw-toggle { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); height: 32px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font-size: 13px; font-weight: 500; }
+.pw-toggle:hover { background: var(--soft); }
 .article-card { width: min(290px, 100%); padding: 12px; display: flex; flex-direction: column; gap: 12px; }
 .source { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .source-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }

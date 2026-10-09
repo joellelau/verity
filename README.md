@@ -41,14 +41,17 @@ You need free accounts on GitHub, Supabase and Vercel.
 
 ### 5. Sign in
 
-Open your Vercel address, enter your email and press **Email me a sign-in link**. Open the email **in the same browser** and you're in.
+Open your Vercel address, choose **Create account**, and enter your email and a password (at least 8 characters). Supabase emails you a confirmation link; open it **in the same browser** and you're in. After that, sign in with your email and password. **Forgot password?** on the sign-in screen emails you a link to choose a new one.
+
+To skip the confirmation email, turn off **Confirm email** under **Authentication → Sign In / Providers → Email** in Supabase.
 
 ## Good to know
 
 - **Guest mode:** the sign-in screen has **Try it as a guest**, so people can try Verity without an account. Guests start with a few sample articles, and everything they do is saved in their browser only, never in your database. **Start fresh** in the menu clears it; **Create an account** switches to normal sign-in (the guest log stays behind in that browser).
 
-- **Sign-in links** must be opened in the browser you requested them from. On a phone, if your mail app opens links elsewhere, copy the link into the browser you used.
-- **Email limits:** Supabase's built-in email sender only sends a few sign-in emails per hour. That's fine for personal use; for more, add your own email provider under **Authentication → Emails → SMTP settings**.
+- **Confirmation and reset links** must be opened in the browser you requested them from. On a phone, if your mail app opens links elsewhere, copy the link into the browser you used.
+- **Email limits:** Supabase's built-in email sender only sends a few emails per hour (confirmations and password resets). That's fine for personal use; for more, add your own email provider under **Authentication → Emails → SMTP settings**.
+- **Deleting:** links, replies and reflections each have a delete button in the chat (on a computer it appears when you hover). Deleting a link also deletes its quotes and notes.
 - **Article titles** are looked up automatically after you save a link (by `api/title.js`). Some sites block this; the title is then guessed from the link and you can fix it with **Edit title**.
 - **Updating the app:** upload changed files to the GitHub repository and Vercel redeploys on its own within a minute.
 - **Privacy:** every row in the database belongs to the account that created it, and the database's security rules only let you read or change your own.
